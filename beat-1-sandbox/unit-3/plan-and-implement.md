@@ -19,7 +19,19 @@ opatki
 
 **Plan comment**
 
-[TODO: paste the permalink to the posted comment, then the exact comment text underneath, once `comment.md` is posted to https://github.com/codepath/pathreview-ai301-fa26-s1/issues/72]
+https://github.com/codepath/pathreview-ai301-fa26-s1/issues/72#issuecomment-5939223134
+
+```
+Plan for the fix, building on the reproduction above: `verify_password` in `core/security.py` lets `pwd_context.verify(...)` raise straight through when the stored hash isn't something passlib can verify — `passlib.exc.UnknownHashError` for an unrecognized format, as in the repro, and a plain `ValueError` for a bcrypt-*shaped* but truncated hash (`"$2b$12$shorttoken"`, found while checking the exception picture before scoping this). The control call against a real bcrypt hash returns `True` normally, so this is isolated to the malformed-hash path.
+
+Checked the exception hierarchy directly against this repo's installed passlib: `UnknownHashError` is itself a `ValueError` subclass. So both shapes above are the same family, not two separate defects. Plan: wrap `pwd_context.verify(...)` in `try`/`except ValueError: return False`, leaving the success path untouched. I also checked that a non-string hash (e.g. an `int`) raises `TypeError`, not `ValueError`, so that caller-contract violation still propagates rather than getting silently swallowed.
+
+I'll drop the `@pytest.mark.xfail` marker from `test_verify_with_wrong_hash_format` per the repo's convention for seeded bugs, and add a second regression case for the truncated-bcrypt shape, since the fix now covers it too.
+
+Risk I'm flagging rather than hiding: catching `ValueError` broadly (instead of only `UnknownHashError`) is deliberate so the truncated-bcrypt sibling gets the same handling, but I haven't exhaustively enumerated every `ValueError` passlib's bcrypt backend can raise beyond the two shapes above — any future variant would also fail closed to `False` under this fix.
+
+Test plan: before the fix, `pytest tests/unit/test_security.py -v` shows the covering test `XFAIL`ing; after, it should `PASS` with no `XPASS(strict)` anywhere, and the existing correct/incorrect-password tests stay green unchanged. I'll also run `make check` before opening the PR.
+```
 
 ---
 
